@@ -37,7 +37,7 @@ hwinfo-monitor/
 ## Requirements
 
 - Windows
-- HWiNFO64 running
+- HWiNFO64 running (tested with HWiNFO64 **v8.54**)
 - HWiNFO Sensor window open
 - **Shared Memory Support** enabled in HWiNFO
 - Python 3.10+
