@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-10-12
+
+### Live charts
+
+- Added a full-width "Live charts" grid (3 per row, fits one 1080p screen) with a 120-sample rolling history:
+  - CPU temperatures (package + per core), CPU usage (total + max thread), RAM used (physical + committed)
+  - GPU temperatures (core, hot spot, memory junction), GPU load (core, memory controller, video engine)
+  - GPU VRAM used, including D3D dynamic memory spilled to system RAM
+  - CPU usage per thread as a grid of mini graphs, one column per core
+  - GPU PCIe bus load with autoscaling
+- Cores and threads are auto-detected, including Intel P-core / E-core naming
+- Search filtering no longer adds points to graph history
+
+### Fixes
+
+- RAM and VRAM cards now convert HWiNFO MB readings to GB instead of printing MB values as GB
+
 ## 2026-04-23
 
 ### Repo cleanup
