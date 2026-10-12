@@ -369,6 +369,16 @@
       line-height: 1;
       margin: -4px 0;
     }
+    .chart-time {
+      position: absolute;
+      left: 0; right: 34px; bottom: 2px;
+      height: 10px;
+      pointer-events: none;
+      font-size: 8px;
+      color: var(--muted);
+      opacity: 0.75;
+    }
+    .chart-time span { position: absolute; transform: translateX(-50%); line-height: 1; }
     .chart-card .trace-legend { margin-top: 6px; gap: 12px; font-size: 10px; }
 
     .gpu-stat-grid {
@@ -713,6 +723,16 @@
       return readings.find(r => r.type === 'temp' && lower(r.sensor).startsWith('cpu') && re.test(lower(r.label)));
     }
 
+    // Temperature scale: at least 30-100°C, widened to whole tens, with a range divisible by 20 so the
+    // quarter grid lines land on round values (e.g. 20 / 40 / 60 / 80 / 100).
+    function tempScale(lo, hi) {
+      let min = Math.min(30, Math.floor(lo / 10) * 10);
+      let max = Math.max(100, Math.ceil(hi / 10) * 10);
+      while ((max - min) % 20 && min > 0) min -= 10;
+      while ((max - min) % 20) max += 10;
+      return [Math.max(0, min), max];
+    }
+
     const CHARTS = [
       {
         id: 'cpuLoad', title: 'CPU usage', unit: '%', decimals: 0,
@@ -724,7 +744,7 @@
       },
       {
         id: 'cpuTemp', title: 'CPU temperatures', unit: '°C', decimals: 0,
-        scale: (lo, hi) => [Math.min(30, Math.floor(lo / 10) * 10), Math.max(100, Math.ceil(hi / 10) * 10)],
+        scale: tempScale,
         series: [
           { key: 'cpu-pkg-temp', label: 'Package', color: '#00D9FF', width: 2.5, get: r => readingValue(cpuTemp(r, /^cpu package$/)) },
           // per-core lines; cores the CPU doesn't have never get data and stay hidden
@@ -736,7 +756,7 @@
       },
       {
         id: 'gpuTemp', title: 'GPU temperatures', unit: '°C', decimals: 0,
-        scale: (lo, hi) => [Math.min(30, Math.floor(lo / 10) * 10), Math.max(100, Math.ceil(hi / 10) * 10)],
+        scale: tempScale,
         series: [
           { key: 'gpu-core-temp', label: 'Core', color: '#00FF88', get: r => readingValue(pick(r, ['gpu temperature'])) },
           { key: 'gpu-hotspot-temp', label: 'Hot spot', color: '#FFC857', get: r => readingValue(pick(r, ['gpu hot spot temperature'])) },
@@ -881,6 +901,36 @@
       </div>
       <div class="resize-handle" title="Drag to resize"></div>`;
 
+    // Plot grid: horizontal lines every 1/8 of the range (every 1/4 brighter, matching the axis labels)
+    // and vertical lines every 10 samples (every 30 brighter). Newest sample is at the right edge.
+    const GRID_TIME_MINOR = 10;
+    const GRID_TIME_MAJOR = 30;
+
+    function plotGrid(h, rows = 8) {
+      const line = (x1, y1, x2, y2, major) =>
+        `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="rgba(255,255,255,${major ? 0.10 : 0.045})"${major ? '' : ' stroke-dasharray="3 4"'} vector-effect="non-scaling-stroke" />`;
+      const lines = [];
+      for (let i = 1; i < rows; i++) {
+        const y = (h * i / rows).toFixed(2);
+        lines.push(line(0, y, CHART_W, y, i % (rows / 4) === 0));
+      }
+      const step = CHART_W / (CHART_HISTORY_LIMIT - 1);
+      for (let k = GRID_TIME_MINOR; k < CHART_HISTORY_LIMIT; k += GRID_TIME_MINOR) {
+        const x = (CHART_W - k * step).toFixed(2);
+        lines.push(line(x, 0, x, h, k % GRID_TIME_MAJOR === 0));
+      }
+      return lines.join('');
+    }
+
+    function timeLabels() {
+      const step = CHART_W / (CHART_HISTORY_LIMIT - 1);
+      const labels = [];
+      for (let k = GRID_TIME_MAJOR; k < CHART_HISTORY_LIMIT; k += GRID_TIME_MAJOR) {
+        labels.push(`<span style="left:${((CHART_W - k * step) / CHART_W * 100).toFixed(2)}%">−${k}s</span>`);
+      }
+      return labels.join('');
+    }
+
     function buildCharts() {
       const html = CHARTS.map(c => {
         if (c.threads) {
@@ -897,9 +947,7 @@
             <div class="trace-legend" id="${c.id}-legend"></div>
           </div>`;
         }
-        const gridLines = [0.25, 0.5, 0.75].map(f =>
-          `<line x1="0" y1="${CHART_H * f}" x2="${CHART_W}" y2="${CHART_H * f}" stroke="rgba(255,255,255,0.07)" stroke-dasharray="4 4" vector-effect="non-scaling-stroke" />`
-        ).join('');
+        const gridLines = plotGrid(CHART_H);
         const paths = c.series.map((s, i) => `
           ${i === 0 ? `<path id="${c.id}-area" fill="${s.color}" opacity="0.10" />` : ''}
           <path id="${c.id}-${s.key}" fill="none" stroke="${s.color}" stroke-width="${s.width || 2}" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke" />`
@@ -920,6 +968,7 @@
               ${paths}
             </svg>
             <div class="chart-axis mono" id="${c.id}-axis"></div>
+            <div class="chart-time mono">${timeLabels()}</div>
           </div>
           <div class="trace-legend" id="${c.id}-legend"></div>
         </div>`;
@@ -1240,7 +1289,7 @@
           <div class="thread-cell">
             <div class="thread-head mono"><span>${t.label}</span><b id="${t.key}-v">--</b></div>
             <svg viewBox="0 0 ${CHART_W} ${THREAD_H}" preserveAspectRatio="none">
-              <line x1="0" y1="${THREAD_H / 2}" x2="${CHART_W}" y2="${THREAD_H / 2}" stroke="rgba(255,255,255,0.06)" stroke-dasharray="4 4" vector-effect="non-scaling-stroke" />
+              ${plotGrid(THREAD_H, 4)}
               <path id="${t.key}-area" opacity="0.15" />
               <path id="${t.key}-line" fill="none" stroke-width="1.5" stroke-linejoin="round" vector-effect="non-scaling-stroke" />
             </svg>
@@ -1296,8 +1345,9 @@
           if (i === 0) $(`${c.id}-area`).setAttribute('d', areaPath(points));
         });
 
-        const axisVals = [maxY, (minY + maxY) / 2, minY];
-        const axisDecimals = maxY - minY < 5 ? 1 : 0;
+        const axisVals = [1, 0.75, 0.5, 0.25, 0].map(f => minY + (maxY - minY) * f);
+        // whole numbers when every quarter of the range lands on one (0/25/50/75/100), otherwise one decimal
+        const axisDecimals = Number.isInteger(Math.round((maxY - minY) / 4 * 1000) / 1000) ? 0 : 1;
         $(`${c.id}-axis`).innerHTML = axisVals.map(v => `<span>${fmt(v, axisDecimals)}</span>`).join('');
 
         const last = (h) => h.length ? h[h.length - 1] : NaN;
