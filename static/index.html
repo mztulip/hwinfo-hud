@@ -211,6 +211,70 @@
       vertical-align: -1px;
     }
 
+    .chart-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0,1fr));
+      gap: 12px;
+    }
+    .chart-card { padding: 10px 12px; }
+    .chart-card.span-2 { grid-column: span 2; }
+
+    .thread-grid {
+      display: grid;
+      grid-auto-flow: column;
+      grid-auto-columns: minmax(0,1fr);
+      gap: 6px;
+      height: 100%;
+    }
+    .thread-cell {
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 6px;
+      background: rgba(255,255,255,0.015);
+      padding: 3px 5px 2px;
+    }
+    .thread-head {
+      display: flex;
+      justify-content: space-between;
+      font-size: 9px;
+      color: var(--muted);
+      line-height: 1.2;
+    }
+    .thread-head b { color: var(--text); font-weight: 700; }
+    .thread-cell svg { flex: 1; min-height: 0; width: 100%; display: block; }
+    .chart-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 6px;
+    }
+    .chart-now { font-size: 18px; font-weight: 700; color: var(--text); }
+    .chart-now span { font-size: 11px; color: var(--muted); font-weight: 500; }
+    .chart-body {
+      position: relative;
+      height: clamp(90px, 15vh, 200px);
+      padding-right: 34px;
+    }
+    .chart-body.no-axis { padding-right: 0; }
+    .chart-body > svg { width: 100%; height: 100%; display: block; overflow: visible; }
+    .chart-axis {
+      position: absolute;
+      top: 0; right: 0; bottom: 0;
+      width: 30px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      font-size: 9px;
+      color: var(--muted);
+      text-align: right;
+      line-height: 1;
+      margin: -4px 0;
+    }
+    .chart-card .trace-legend { margin-top: 6px; gap: 12px; font-size: 10px; }
+
     .gpu-stat-grid {
       display: grid;
       grid-template-columns: repeat(4, minmax(0,1fr));
@@ -229,7 +293,12 @@
     .health-item.amber { background: rgba(255,200,87,0.06); border-color: rgba(255,200,87,0.14); color: #FFD37D; }
     .health-item.blue { background: rgba(0,217,255,0.06); border-color: rgba(0,217,255,0.14); color: #85E8FF; }
 
+    @media (max-width: 1400px) {
+      .chart-grid { grid-template-columns: repeat(2, minmax(0,1fr)); }
+    }
     @media (max-width: 900px) {
+      .chart-grid { grid-template-columns: 1fr; }
+      .chart-card.span-2 { grid-column: auto; }
       .gpu-stat-grid { grid-template-columns: repeat(2, minmax(0,1fr)); }
       .main-grid-3, .main-grid-4, .main-grid-2 { grid-template-columns: 1fr !important; }
     }
@@ -238,7 +307,7 @@
 <body>
   <div class="scanline"></div>
 
-  <div style="max-width: 1240px; margin: 0 auto; padding: 16px 16px 40px;">
+  <div style="margin: 0 auto; padding: 16px 20px 40px;">
     <header class="flex items-center justify-between gap-4 mb-4">
       <div class="flex items-center gap-3">
         <iconify-icon icon="lucide:activity" class="text-2xl" style="color:var(--cyan)"></iconify-icon>
@@ -275,6 +344,9 @@
         <div class="mono text-[10px] mt-1" style="color:var(--muted)" id="gpuSub"></div>
       </div>
     </section>
+
+    <div class="section-title" style="margin-top:0">Live charts — CPU / GPU</div>
+    <section class="chart-grid mb-4" id="liveCharts"></section>
 
     <div class="section-title">CPU — Temperature cores</div>
     <section class="glass rounded-xl p-4 mb-4">
@@ -490,6 +562,350 @@
           <div class="trace-legend">${legend}</div>
         </div>
       `;
+    }
+
+    // ---- Live charts (CPU usage, GPU temps, VRAM, bus load) ----
+    const CHART_HISTORY_LIMIT = 120;
+    const CHART_W = 600;
+    const CHART_H = 140;
+    const chartHistory = new Map();
+
+    const readingValue = (r) => r ? Number(r.value ?? r.avg) : NaN;
+    const toGB = (r) => {
+      if (!r) return NaN;
+      const v = readingValue(r);
+      const u = lower(r.unit);
+      if (u === 'mb') return v / 1024;
+      if (u === 'kb') return v / (1024 * 1024);
+      return v;
+    };
+
+    function vramTotalGB(readings) {
+      const alloc = pick(readings, ['gpu memory allocated']);
+      const avail = pick(readings, ['gpu memory available']);
+      return alloc && avail ? toGB(alloc) + toGB(avail) : NaN;
+    }
+
+    function niceCeil(v, steps) {
+      return steps.find(s => s >= v) ?? steps[steps.length - 1];
+    }
+
+    const CPU_CORE_COLORS = ['#7B8CFF', '#C77DFF', '#FF8A5B', '#00FF88', '#FFC857', '#FF5D73', '#54D3FF', '#93A0B3'];
+    const MAX_CPU_CORES = 16;
+
+    function cpuTemp(readings, re) {
+      return readings.find(r => r.type === 'temp' && lower(r.sensor).startsWith('cpu') && re.test(lower(r.label)));
+    }
+
+    const CHARTS = [
+      {
+        id: 'cpuLoad', title: 'CPU usage', unit: '%', decimals: 0,
+        scale: () => [0, 100],
+        series: [
+          { key: 'cpu-total', label: 'Total', color: '#00D9FF', get: r => readingValue(pick(r, ['total cpu usage'])) },
+          { key: 'cpu-thread-max', label: 'Max thread', color: '#7B8CFF', get: r => readingValue(pick(r, ['max cpu/thread usage'])) },
+        ],
+      },
+      {
+        id: 'cpuTemp', title: 'CPU temperatures', unit: '°C', decimals: 0,
+        scale: (lo, hi) => [Math.min(30, Math.floor(lo / 10) * 10), Math.max(100, Math.ceil(hi / 10) * 10)],
+        series: [
+          { key: 'cpu-pkg-temp', label: 'Package', color: '#00D9FF', width: 2.5, get: r => readingValue(cpuTemp(r, /^cpu package$/)) },
+          // per-core lines; cores the CPU doesn't have never get data and stay hidden
+          ...Array.from({ length: MAX_CPU_CORES }, (_, i) => ({
+            key: `cpu-core${i}-temp`, label: `Core ${i}`, color: CPU_CORE_COLORS[i % CPU_CORE_COLORS.length], width: 1.25,
+            get: r => readingValue(cpuTemp(r, new RegExp(`^([pe]-)?core ${i}$`))),
+          })),
+        ],
+      },
+      {
+        id: 'gpuTemp', title: 'GPU temperatures', unit: '°C', decimals: 0,
+        scale: (lo, hi) => [Math.min(30, Math.floor(lo / 10) * 10), Math.max(100, Math.ceil(hi / 10) * 10)],
+        series: [
+          { key: 'gpu-core-temp', label: 'Core', color: '#00FF88', get: r => readingValue(pick(r, ['gpu temperature'])) },
+          { key: 'gpu-hotspot-temp', label: 'Hot spot', color: '#FFC857', get: r => readingValue(pick(r, ['gpu hot spot temperature'])) },
+          { key: 'gpu-memjunc-temp', label: 'Mem junction', color: '#FF5D73', get: r => readingValue(pick(r, ['gpu memory junction temperature'])) },
+        ],
+      },
+      {
+        id: 'gpuLoad', title: 'GPU load', unit: '%', decimals: 0,
+        scale: () => [0, 100],
+        note: (readings) => {
+          const tdp = pick(readings, ['total gpu power [% of tdp]']);
+          return tdp ? `power ${fmt(tdp.value, 0)}% of TDP` : '';
+        },
+        series: [
+          { key: 'gpu-core-load', label: 'Core', color: '#00FF88', get: r => readingValue(pick(r, ['gpu core load'])) },
+          { key: 'gpu-memctrl-load', label: 'Memory controller', color: '#FFC857', get: r => readingValue(pick(r, ['gpu memory controller load'])) },
+          { key: 'gpu-video-load', label: 'Video engine', color: '#C77DFF', get: r => readingValue(pick(r, ['gpu video engine load'])) },
+        ],
+      },
+      {
+        id: 'ramUsed', title: 'RAM used', unit: ' GB', decimals: 1,
+        scale: (lo, hi, readings) => {
+          const used = pick(readings, ['physical memory used']);
+          const avail = pick(readings, ['physical memory available']);
+          const total = used && avail ? toGB(used) + toGB(avail) : NaN;
+          // committed can exceed physical RAM (pagefile), so let the scale grow past it
+          return [0, Math.max(Number.isFinite(total) ? total : 0, Math.ceil(hi * 1.1), 1)];
+        },
+        note: (readings) => {
+          const used = pick(readings, ['physical memory used']);
+          const avail = pick(readings, ['physical memory available']);
+          const load = pick(readings, ['physical memory load']);
+          const total = used && avail ? toGB(used) + toGB(avail) : NaN;
+          return `${load ? fmt(load.value, 0) + '% · ' : ''}${Number.isFinite(total) ? fmt(total, 1) + ' GB total' : ''}`;
+        },
+        series: [
+          { key: 'ram-used', label: 'Physical used', color: '#00D9FF', get: r => toGB(pick(r, ['physical memory used'])) },
+          { key: 'ram-committed', label: 'Committed (incl. pagefile)', color: '#FFC857', width: 1.5, get: r => toGB(pick(r, ['virtual memory committed'])) },
+        ],
+      },
+      {
+        id: 'gpuVram', title: 'GPU VRAM used', unit: ' GB', decimals: 2,
+        scale: (lo, hi, readings) => {
+          const total = vramTotalGB(readings);
+          return [0, Number.isFinite(total) && total > 0 ? total : Math.max(1, Math.ceil(hi * 1.25))];
+        },
+        note: (readings) => {
+          const pct = readingValue(pick(readings, ['gpu memory usage']));
+          const total = vramTotalGB(readings);
+          return `${Number.isFinite(pct) ? fmt(pct, 0) + '% · ' : ''}${Number.isFinite(total) ? fmt(total, 1) + ' GB total' : ''}`;
+        },
+        series: [
+          { key: 'gpu-vram-alloc', label: 'Allocated', color: '#00D9FF', get: r => toGB(pick(r, ['gpu memory allocated'])) },
+          { key: 'gpu-vram-d3d', label: 'D3D dedicated', color: '#00FF88', get: r => toGB(pick(r, ['gpu d3d memory dedicated'])) },
+          // shared memory: what the driver keeps in system RAM and pulls over PCIe when VRAM spills
+          { key: 'gpu-vram-dynamic', label: 'Spill to RAM (D3D dynamic)', color: '#FFC857', get: r => toGB(pick(r, ['gpu d3d memory dynamic'])) },
+        ],
+      },
+      {
+        id: 'gpuBus', title: 'GPU bus load', unit: '%', decimals: 0,
+        // bus load is usually low — autoscale so small spikes stay visible
+        scale: (lo, hi) => [0, niceCeil(hi * 1.25, [10, 20, 25, 50, 75, 100])],
+        note: (readings) => {
+          const pcie = pick(readings, ['pcie link speed']);
+          return pcie ? `PCIe ${fmt(pcie.value, 1)} GT/s` : '';
+        },
+        series: [
+          { key: 'gpu-bus', label: 'Bus load', color: '#C77DFF', get: r => readingValue(pick(r, ['gpu bus load'])) },
+        ],
+      },
+      // per-thread mini graphs; threads are discovered from the readings at runtime
+      { id: 'cpuThreads', title: 'CPU usage per thread', unit: '%', decimals: 0, threads: true },
+    ];
+
+    // 3 per row: CPU / system row, GPU row, then per-thread grid (2 cells wide) + bus load
+    const CHART_ORDER = ['cpuTemp', 'cpuLoad', 'ramUsed', 'gpuTemp', 'gpuLoad', 'gpuVram', 'cpuThreads', 'gpuBus'];
+    CHARTS.sort((x, y) => CHART_ORDER.indexOf(x.id) - CHART_ORDER.indexOf(y.id));
+
+    function buildCharts() {
+      $('liveCharts').innerHTML = CHARTS.map(c => {
+        if (c.threads) {
+          return `<div class="glass rounded-xl chart-card span-2">
+            <div class="bracket tl"></div><div class="bracket tr"></div><div class="bracket bl"></div><div class="bracket br"></div>
+            <div class="chart-head">
+              <div>
+                <div class="eyebrow">${c.title}</div>
+                <div class="mono text-[10px]" style="color:var(--muted)" id="${c.id}-note"></div>
+              </div>
+              <div class="chart-now mono" id="${c.id}-now">--</div>
+            </div>
+            <div class="chart-body no-axis"><div class="thread-grid" id="${c.id}-grid"></div></div>
+            <div class="trace-legend" id="${c.id}-legend"></div>
+          </div>`;
+        }
+        const gridLines = [0.25, 0.5, 0.75].map(f =>
+          `<line x1="0" y1="${CHART_H * f}" x2="${CHART_W}" y2="${CHART_H * f}" stroke="rgba(255,255,255,0.07)" stroke-dasharray="4 4" vector-effect="non-scaling-stroke" />`
+        ).join('');
+        const paths = c.series.map((s, i) => `
+          ${i === 0 ? `<path id="${c.id}-area" fill="${s.color}" opacity="0.10" />` : ''}
+          <path id="${c.id}-${s.key}" fill="none" stroke="${s.color}" stroke-width="${s.width || 2}" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke" />`
+        ).join('');
+        return `<div class="glass rounded-xl chart-card">
+          <div class="bracket tl"></div><div class="bracket tr"></div><div class="bracket bl"></div><div class="bracket br"></div>
+          <div class="chart-head">
+            <div>
+              <div class="eyebrow">${c.title}</div>
+              <div class="mono text-[10px]" style="color:var(--muted)" id="${c.id}-note"></div>
+            </div>
+            <div class="chart-now mono" id="${c.id}-now">--</div>
+          </div>
+          <div class="chart-body">
+            <svg viewBox="0 0 ${CHART_W} ${CHART_H}" preserveAspectRatio="none">
+              <rect x="0" y="0" width="${CHART_W}" height="${CHART_H}" fill="none" stroke="rgba(255,255,255,0.06)" vector-effect="non-scaling-stroke" />
+              ${gridLines}
+              ${paths}
+            </svg>
+            <div class="chart-axis mono" id="${c.id}-axis"></div>
+          </div>
+          <div class="trace-legend" id="${c.id}-legend"></div>
+        </div>`;
+      }).join('');
+    }
+
+    function pushHistory(key, value) {
+      if (!chartHistory.has(key)) chartHistory.set(key, []);
+      const arr = chartHistory.get(key);
+      arr.push(value);
+      if (arr.length > CHART_HISTORY_LIMIT) arr.shift();
+    }
+
+    // "Core 0 T1 Usage", "P-core 2 T0 Usage", "E-core 8 T0 Usage"
+    const THREAD_RE = /^(?:([pe])-)?core (\d+) t(\d+) usage$/;
+    const cpuThreads = [];
+    let threadLayoutSig = '';
+
+    function recordThreads(readings) {
+      const seen = new Map();
+      for (const r of readings) {
+        if (!lower(r.sensor).startsWith('cpu')) continue;
+        const m = lower(r.label).match(THREAD_RE);
+        if (!m) continue;
+        const key = `thr-${m[1] || ''}${m[2]}-${m[3]}`;
+        seen.set(key, readingValue(r));
+        if (!cpuThreads.some(t => t.key === key)) {
+          cpuThreads.push({ key, core: +m[2], thread: +m[3], label: `${m[1] ? m[1].toUpperCase() + '-' : ''}Core ${m[2]} · T${m[3]}` });
+          cpuThreads.sort((a, b) => a.core - b.core || a.thread - b.thread);
+        }
+      }
+      for (const t of cpuThreads) pushHistory(t.key, seen.has(t.key) ? seen.get(t.key) : NaN);
+    }
+
+    function recordCharts(readings) {
+      for (const c of CHARTS) {
+        if (c.threads) continue;
+        for (const s of c.series) pushHistory(s.key, s.get(readings));
+      }
+      recordThreads(readings);
+    }
+
+    // Newest sample sits at the right edge; missing samples (NaN) break the line.
+    function chartPoints(values, minY, maxY, h = CHART_H) {
+      const step = CHART_W / (CHART_HISTORY_LIMIT - 1);
+      const offset = CHART_HISTORY_LIMIT - values.length;
+      const range = Math.max(1e-6, maxY - minY);
+      return values.map((v, i) => Number.isFinite(v) ? {
+        x: (offset + i) * step,
+        y: h - Math.min(1, Math.max(0, (v - minY) / range)) * h,
+      } : null);
+    }
+
+    function linePath(points) {
+      let d = '';
+      let pen = false;
+      for (const p of points) {
+        if (!p) { pen = false; continue; }
+        d += `${pen ? 'L' : 'M'}${p.x.toFixed(1)} ${p.y.toFixed(1)} `;
+        pen = true;
+      }
+      return d;
+    }
+
+    function areaPath(points, h = CHART_H) {
+      const pts = points.filter(Boolean);
+      if (pts.length < 2) return '';
+      return `M${pts[0].x.toFixed(1)} ${h} ` +
+        pts.map(p => `L${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' ') +
+        ` L${pts[pts.length - 1].x.toFixed(1)} ${h} Z`;
+    }
+
+    const THREAD_H = 100;
+    const loadColor = (v) => !Number.isFinite(v) ? '#7E9BB0' : v >= 90 ? '#FF5D73' : v >= 70 ? '#FFC857' : '#00D9FF';
+
+    function renderThreads(c) {
+      const grid = $(`${c.id}-grid`);
+      const sig = cpuThreads.map(t => t.key).join(',');
+      if (sig !== threadLayoutSig) {
+        threadLayoutSig = sig;
+        // one column per core when every core has the same thread count, otherwise just wrap
+        const perCore = new Map();
+        cpuThreads.forEach(t => perCore.set(t.core, (perCore.get(t.core) || 0) + 1));
+        const counts = [...new Set(perCore.values())];
+        const n = cpuThreads.length;
+        const rows = counts.length === 1 && counts[0] <= 4 && perCore.size <= 12 ? counts[0] : n <= 8 ? 2 : n <= 18 ? 3 : 4;
+        grid.style.gridTemplateRows = `repeat(${rows}, minmax(0,1fr))`;
+        grid.innerHTML = cpuThreads.map(t => `
+          <div class="thread-cell">
+            <div class="thread-head mono"><span>${t.label}</span><b id="${t.key}-v">--</b></div>
+            <svg viewBox="0 0 ${CHART_W} ${THREAD_H}" preserveAspectRatio="none">
+              <line x1="0" y1="${THREAD_H / 2}" x2="${CHART_W}" y2="${THREAD_H / 2}" stroke="rgba(255,255,255,0.06)" stroke-dasharray="4 4" vector-effect="non-scaling-stroke" />
+              <path id="${t.key}-area" opacity="0.15" />
+              <path id="${t.key}-line" fill="none" stroke-width="1.5" stroke-linejoin="round" vector-effect="non-scaling-stroke" />
+            </svg>
+          </div>`).join('');
+      }
+
+      let busiest = null;
+      const lastVals = [];
+      for (const t of cpuThreads) {
+        const hist = chartHistory.get(t.key) || [];
+        const v = hist.length ? hist[hist.length - 1] : NaN;
+        const color = loadColor(v);
+        const points = chartPoints(hist, 0, 100, THREAD_H);
+        const line = $(`${t.key}-line`);
+        line.setAttribute('d', linePath(points));
+        line.setAttribute('stroke', color);
+        const area = $(`${t.key}-area`);
+        area.setAttribute('d', areaPath(points, THREAD_H));
+        area.setAttribute('fill', color);
+        $(`${t.key}-v`).textContent = Number.isFinite(v) ? `${fmt(v, 0)}%` : '--';
+        if (Number.isFinite(v)) {
+          lastVals.push(v);
+          if (!busiest || v > busiest.v) busiest = { t, v };
+        }
+      }
+
+      const cores = new Set(cpuThreads.map(t => t.core)).size;
+      const avg = lastVals.length ? lastVals.reduce((a, b) => a + b, 0) / lastVals.length : NaN;
+      $(`${c.id}-now`).innerHTML = busiest ? `${fmt(busiest.v, 0)}<span>% max</span>` : '--';
+      $(`${c.id}-note`).textContent = cpuThreads.length
+        ? `${cores} cores · ${cpuThreads.length} threads · avg ${fmt(avg, 0)}%${busiest ? ` · busiest ${busiest.t.label}` : ''}`
+        : 'no per-thread sensors';
+      $(`${c.id}-legend`).innerHTML = cpuThreads.length
+        ? `<div>each cell 0–100% · last ${CHART_HISTORY_LIMIT}s</div>
+           <div><span class="trace-dot" style="background:#00D9FF"></span>&lt;70%</div>
+           <div><span class="trace-dot" style="background:#FFC857"></span>70–90%</div>
+           <div><span class="trace-dot" style="background:#FF5D73"></span>&ge;90%</div>`
+        : `<div>Sensor not found in HWiNFO</div>`;
+    }
+
+    function renderCharts(readings) {
+      for (const c of CHARTS) {
+        if (c.threads) { renderThreads(c); continue; }
+        const histories = c.series.map(s => chartHistory.get(s.key) || []);
+        const all = histories.flat().filter(Number.isFinite);
+        const lo = all.length ? Math.min(...all) : 0;
+        const hi = all.length ? Math.max(...all) : 0;
+        const [minY, maxY] = c.scale(lo, hi, readings);
+
+        c.series.forEach((s, i) => {
+          const points = chartPoints(histories[i], minY, maxY);
+          $(`${c.id}-${s.key}`).setAttribute('d', linePath(points));
+          if (i === 0) $(`${c.id}-area`).setAttribute('d', areaPath(points));
+        });
+
+        const axisVals = [maxY, (minY + maxY) / 2, minY];
+        const axisDecimals = maxY - minY < 5 ? 1 : 0;
+        $(`${c.id}-axis`).innerHTML = axisVals.map(v => `<span>${fmt(v, axisDecimals)}</span>`).join('');
+
+        const last = (h) => h.length ? h[h.length - 1] : NaN;
+        const primary = last(histories[0]);
+        const primaryPeak = Math.max(...histories[0].filter(Number.isFinite), -Infinity);
+        $(`${c.id}-now`).innerHTML = Number.isFinite(primary)
+          ? `${fmt(primary, c.decimals)}<span>${c.unit}</span>`
+          : '--';
+
+        const note = c.note ? c.note(readings) : '';
+        const peakText = Number.isFinite(primaryPeak) ? `peak ${fmt(primaryPeak, c.decimals)}${c.unit} / ${CHART_HISTORY_LIMIT}s` : 'no data';
+        $(`${c.id}-note`).textContent = note ? `${note} · ${peakText}` : peakText;
+
+        $(`${c.id}-legend`).innerHTML = c.series
+          .map((s, i) => ({ s, v: last(histories[i]), seen: histories[i].some(Number.isFinite) }))
+          .filter(x => x.seen)
+          .map(({ s, v }) => `<div><span class="trace-dot" style="background:${s.color}; box-shadow:0 0 8px ${s.color}"></span>${s.label} <span class="mono" style="color:var(--text)">${fmt(v, c.decimals)}${c.unit}</span></div>`)
+          .join('') || `<div>Sensor not found in HWiNFO</div>`;
+      }
     }
 
     function renderHero(readings) {
@@ -754,6 +1170,7 @@
       latestMeta = meta || {};
       $('sampleMeta').textContent = `${new Date().toLocaleString()} · ${readings.length} readings · polling ${meta?.polling_period || '--'} ms`;
       renderHero(readings);
+      renderCharts(lastFullReadings);
       renderCpuBars(readings);
       renderCpuPanels(readings);
       renderGpu(readings);
@@ -762,12 +1179,19 @@
       renderHealth(readings);
     }
 
+    let lastFullReadings = [];
+    function ingest(data) {
+      if (!data.readings) return;
+      lastFullReadings = data.readings;
+      recordCharts(data.readings);
+      render(data.readings, data.meta || {});
+    }
+
     function connect() {
       if (socket) socket.close();
       socket = new WebSocket(`ws://${location.host}/ws`);
       socket.onmessage = (e) => {
-        const data = JSON.parse(e.data);
-        if (data.readings) render(data.readings, data.meta || {});
+        ingest(JSON.parse(e.data));
       };
       socket.onopen = () => {
         $('healthPill').textContent = 'Live';
@@ -782,8 +1206,7 @@
 
     $('refreshBtn').addEventListener('click', async () => {
       const res = await fetch('/api/readings');
-      const data = await res.json();
-      if (data.readings) render(data.readings, data.meta || {});
+      ingest(await res.json());
     });
 
     $('searchInput').addEventListener('input', (e) => {
@@ -793,6 +1216,7 @@
       render(filtered, latestMeta);
     });
 
+    buildCharts();
     connect();
   </script>
 </body>
