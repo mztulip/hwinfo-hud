@@ -261,15 +261,41 @@
       border-bottom-right-radius: 10px;
     }
     .chart-grid.editing .resize-handle { display: block; }
-    .size-badge {
+    .size-ctrl {
       display: none;
       position: absolute;
-      right: 24px; bottom: 4px;
+      right: 24px; bottom: 3px;
+      align-items: center;
+      gap: 4px;
       font-size: 9px;
       color: #7DE6FF;
       z-index: 5;
     }
-    .chart-grid.editing .size-badge { display: block; }
+    .chart-grid.editing .size-ctrl { display: flex; }
+    .size-ctrl button {
+      width: 16px; height: 16px;
+      line-height: 14px;
+      border-radius: 4px;
+      border: 1px solid rgba(0,217,255,0.45);
+      background: rgba(0,217,255,0.10);
+      color: #7DE6FF;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .size-ctrl button:hover { background: rgba(0,217,255,0.25); }
+    .size-ctrl button:disabled { opacity: 0.3; cursor: default; }
+    .resize-preview {
+      display: none;
+      position: absolute;
+      top: 0; left: 0;
+      height: 100%;
+      border: 1px dashed rgba(0,217,255,0.9);
+      border-radius: 12px;
+      background: rgba(0,217,255,0.05);
+      pointer-events: none;
+      z-index: 4;
+    }
+    .chart-card.resizing .resize-preview { display: block; }
 
     .thread-grid {
       display: grid;
@@ -401,7 +427,7 @@
     <div class="flex items-center justify-between gap-3">
       <div class="section-title" style="margin-top:0">Live charts — CPU / GPU</div>
       <div class="flex items-center gap-2" style="margin-bottom:10px">
-        <span id="layoutHint" class="layout-hint mono" hidden>Drag a chart to move it · drag the corner to resize</span>
+        <span id="layoutHint" class="layout-hint mono" hidden>Drag a chart to move it · drag the corner to resize · − / + changes width</span>
         <button id="layoutResetBtn" class="layout-btn mono" hidden>Reset</button>
         <button id="layoutEditBtn" class="layout-btn mono">Edit layout</button>
       </div>
@@ -783,7 +809,13 @@
     let layout = loadLayout();
     CHARTS.sort((x, y) => layout.order.indexOf(x.id) - layout.order.indexOf(y.id));
 
-    const layoutChrome = `<div class="size-badge mono"></div><div class="resize-handle" title="Drag to resize"></div>`;
+    const layoutChrome = `<div class="resize-preview"></div>
+      <div class="size-ctrl mono">
+        <button type="button" data-cols="-1" title="Narrower (one column less)">−</button>
+        <span class="size-badge"></span>
+        <button type="button" data-cols="1" title="Wider (one column more)">+</button>
+      </div>
+      <div class="resize-handle" title="Drag to resize"></div>`;
 
     function buildCharts() {
       $('liveCharts').innerHTML = CHARTS.map(c => {
@@ -876,6 +908,8 @@
         const body = card.querySelector('.chart-body');
         body.style.height = size.h ? `${size.h}px` : '';
         card.querySelector('.size-badge').textContent = `${cols} col · ${Math.round(body.getBoundingClientRect().height)}px`;
+        card.querySelector('[data-cols="-1"]').disabled = cols <= 1;
+        card.querySelector('[data-cols="1"]').disabled = cols >= maxCols;
       });
     }
 
@@ -898,7 +932,7 @@
       // the card stays in the grid as a faded placeholder, a ghost copy follows the pointer,
       // and the placeholder is moved before/after whichever card the pointer is over.
       grid.addEventListener('pointerdown', (e) => {
-        if (!layoutEditing || e.button !== 0 || e.target.closest?.('.resize-handle')) return;
+        if (!layoutEditing || e.button !== 0 || e.target.closest?.('.resize-handle, .size-ctrl')) return;
         const card = e.target.closest?.('.chart-card');
         if (!card) return;
         e.preventDefault();
@@ -960,34 +994,57 @@
         const gridRect = grid.getBoundingClientRect();
         const gap = parseFloat(getComputedStyle(grid).columnGap) || 0;
         const maxCols = gridColumnCount();
+        const colW = (gridRect.width - gap * (maxCols - 1)) / maxCols;
         resizing = {
           card,
           id: card.dataset.chart,
+          startX: e.clientX,
           startY: e.clientY,
           startH: body.getBoundingClientRect().height,
-          colW: (gridRect.width - gap * (maxCols - 1)) / maxCols,
+          startW: card.getBoundingClientRect().width,
+          startCols: Math.min(layout.sizes[card.dataset.chart]?.cols || 1, maxCols),
+          colW,
           gap,
           maxCols,
-          left: card.getBoundingClientRect().left,
         };
+        card.classList.add('resizing');
+        card.querySelector('.resize-preview').style.width = `${resizing.startW}px`;
         handle.setPointerCapture(e.pointerId);
       });
 
       grid.addEventListener('pointermove', (e) => {
         if (!resizing) return;
-        const { id, startY, startH, colW, gap, maxCols, left } = resizing;
-        const width = e.clientX - left;
-        const cols = Math.max(1, Math.min(maxCols, Math.round((width + gap) / (colW + gap))));
+        const { card, id, startX, startY, startH, startW, startCols, colW, gap, maxCols } = resizing;
+        const dx = e.clientX - startX;
+        // width works in whole columns, measured from where the drag started (so it also works
+        // for cards that wrap to the next row); a quarter of a column is enough to step
+        const steps = dx / (colW + gap);
+        const delta = steps >= 0 ? Math.floor(steps + 0.75) : -Math.floor(-steps + 0.75);
+        const cols = Math.max(1, Math.min(maxCols, startCols + delta));
         const h = Math.round(Math.max(MIN_CHART_H, Math.min(MAX_CHART_H, startH + (e.clientY - startY))));
+        card.querySelector('.resize-preview').style.width = `${Math.max(colW / 2, startW + dx)}px`;
         layout.sizes[id] = { ...layout.sizes[id], cols, h };
         applyLayout();
       });
 
       const endResize = () => {
         if (!resizing) return;
+        resizing.card.classList.remove('resizing');
         resizing = null;
         saveLayout();
       };
+
+      grid.addEventListener('click', (e) => {
+        const btn = e.target.closest?.('.size-ctrl button');
+        if (!layoutEditing || !btn) return;
+        const id = btn.closest('.chart-card').dataset.chart;
+        const maxCols = gridColumnCount();
+        const current = Math.min(layout.sizes[id]?.cols || 1, maxCols);
+        const cols = Math.max(1, Math.min(maxCols, current + Number(btn.dataset.cols)));
+        layout.sizes[id] = { ...layout.sizes[id], cols };
+        saveLayout();
+        applyLayout();
+      });
       grid.addEventListener('pointerup', endResize);
       grid.addEventListener('pointercancel', endResize);
 
