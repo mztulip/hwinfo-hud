@@ -238,9 +238,18 @@
       outline: 1px dashed rgba(0,217,255,0.45);
       outline-offset: 2px;
       user-select: none;
+      touch-action: none; /* lets touch screens drag instead of scroll */
     }
-    .chart-grid.editing .chart-card:active { cursor: grabbing; }
-    .chart-card.dragging { opacity: 0.35; }
+    .chart-card.dragging { opacity: 0.3; }
+    .drag-ghost {
+      position: fixed;
+      z-index: 100;
+      pointer-events: none;
+      opacity: 0.9;
+      cursor: grabbing;
+      box-shadow: 0 18px 48px rgba(0,0,0,0.6), 0 0 0 1px rgba(0,217,255,0.6);
+    }
+    body.layout-dragging, body.layout-dragging * { cursor: grabbing !important; }
     .resize-handle {
       display: none;
       position: absolute;
@@ -873,7 +882,6 @@
     function setLayoutEditing(on) {
       layoutEditing = on;
       $('liveCharts').classList.toggle('editing', on);
-      document.querySelectorAll('#liveCharts .chart-card').forEach(card => { card.draggable = on; });
       $('layoutEditBtn').classList.toggle('active', on);
       $('layoutEditBtn').textContent = on ? 'Done' : 'Edit layout';
       $('layoutResetBtn').hidden = !on;
@@ -883,40 +891,64 @@
 
     function initLayoutEditing() {
       const grid = $('liveCharts');
-      let dragged = null;
+      let dragging = null;
       let resizing = null;
 
-      grid.addEventListener('dragstart', (e) => {
+      // Moving uses plain pointer events (not HTML5 drag & drop, which behaves differently in Firefox):
+      // the card stays in the grid as a faded placeholder, a ghost copy follows the pointer,
+      // and the placeholder is moved before/after whichever card the pointer is over.
+      grid.addEventListener('pointerdown', (e) => {
+        if (!layoutEditing || e.button !== 0 || e.target.closest?.('.resize-handle')) return;
         const card = e.target.closest?.('.chart-card');
-        if (!layoutEditing || !card || resizing) { e.preventDefault(); return; }
-        dragged = card;
-        card.classList.add('dragging');
-        e.dataTransfer.effectAllowed = 'move';
-        e.dataTransfer.setData('text/plain', card.dataset.chart);
+        if (!card) return;
+        e.preventDefault();
+        const r = card.getBoundingClientRect();
+        dragging = { card, startX: e.clientX, startY: e.clientY, offX: e.clientX - r.left, offY: e.clientY - r.top, ghost: null };
       });
 
-      grid.addEventListener('dragover', (e) => {
-        if (!dragged) return;
-        e.preventDefault();
-        const target = e.target.closest?.('.chart-card');
-        if (!target || target === dragged) return;
+      window.addEventListener('pointermove', (e) => {
+        if (!dragging) return;
+        const d = dragging;
+        if (!d.ghost) {
+          // small dead zone so a plain click doesn't start a drag
+          if (Math.hypot(e.clientX - d.startX, e.clientY - d.startY) < 6) return;
+          const r = d.card.getBoundingClientRect();
+          d.ghost = d.card.cloneNode(true);
+          d.ghost.querySelectorAll('[id]').forEach(el => el.removeAttribute('id'));
+          d.ghost.classList.add('drag-ghost');
+          d.ghost.style.width = `${r.width}px`;
+          d.ghost.style.height = `${r.height}px`;
+          document.body.appendChild(d.ghost);
+          d.card.classList.add('dragging');
+          document.body.classList.add('layout-dragging');
+        }
+        d.ghost.style.left = `${e.clientX - d.offX}px`;
+        d.ghost.style.top = `${e.clientY - d.offY}px`;
+
+        const target = document.elementFromPoint(e.clientX, e.clientY)?.closest?.('#liveCharts .chart-card');
+        if (!target || target === d.card) return;
         const r = target.getBoundingClientRect();
         // before/after by the pointer's horizontal half, like reading order
         const after = e.clientX > r.left + r.width / 2;
-        grid.insertBefore(dragged, after ? target.nextSibling : target);
+        const ref = after ? target.nextSibling : target;
+        if (ref !== d.card && ref !== d.card.nextSibling) grid.insertBefore(d.card, ref);
       });
 
-      grid.addEventListener('drop', (e) => { if (dragged) e.preventDefault(); });
-
-      grid.addEventListener('dragend', () => {
-        if (!dragged) return;
-        dragged.classList.remove('dragging');
-        dragged = null;
+      const endDrag = () => {
+        if (!dragging) return;
+        const d = dragging;
+        dragging = null;
+        if (!d.ghost) return;
+        d.ghost.remove();
+        d.card.classList.remove('dragging');
+        document.body.classList.remove('layout-dragging');
         layout.order = [...grid.querySelectorAll('.chart-card')].map(c => c.dataset.chart);
         CHARTS.sort((x, y) => layout.order.indexOf(x.id) - layout.order.indexOf(y.id));
         saveLayout();
         applyLayout();
-      });
+      };
+      window.addEventListener('pointerup', endDrag);
+      window.addEventListener('pointercancel', endDrag);
 
       grid.addEventListener('pointerdown', (e) => {
         const handle = e.target.closest?.('.resize-handle');
@@ -924,7 +956,6 @@
         e.preventDefault();
         e.stopPropagation();
         const card = handle.closest('.chart-card');
-        card.draggable = false;
         const body = card.querySelector('.chart-body');
         const gridRect = grid.getBoundingClientRect();
         const gap = parseFloat(getComputedStyle(grid).columnGap) || 0;
@@ -954,7 +985,6 @@
 
       const endResize = () => {
         if (!resizing) return;
-        resizing.card.draggable = layoutEditing;
         resizing = null;
         saveLayout();
       };
