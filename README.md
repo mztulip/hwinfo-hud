@@ -52,7 +52,7 @@ In HWiNFO64:
 ### 2. Install dependencies
 
 ```bash
-cd projects/hwinfo-monitor
+cd hwinfo-hud
 pip install -r requirements.txt
 ```
 
@@ -67,6 +67,25 @@ Then open:
 ```text
 http://127.0.0.1:8080
 ```
+
+The server listens on `0.0.0.0:8080`, so the HUD can also be opened from another device on the same network (phone, tablet, second PC) at `http://<your-pc-ip>:8080`. Windows Firewall may ask to allow Python on first run. Allow it for private networks only. If you don't want LAN access, change `host` in `server.py` back to `127.0.0.1`.
+
+## Live charts
+
+The top of the dashboard is a full-width grid of live charts sized to fit a single 1080p screen (3 per row, 2 below 1400px, 1 below 900px). Each chart keeps a rolling 120-sample history (about 2 minutes at the default 1s stream).
+
+| Row | Charts |
+|---|---|
+| CPU / system | **CPU temperatures** (package + per core) · **CPU usage** (total + max thread) · **RAM used** (physical + committed incl. pagefile) |
+| GPU | **GPU temperatures** (core, hot spot, memory junction) · **GPU load** (core, memory controller, video engine, % of TDP) · **GPU VRAM used** (allocated, D3D dedicated, D3D dynamic) |
+| Detail | **CPU usage per thread** (grid of mini graphs, one column per core) · **GPU bus load** (PCIe, autoscaled) |
+
+Notes:
+- Cores and threads are detected from the HWiNFO readings, including Intel P-core / E-core naming.
+- Charts with a missing sensor show "Sensor not found in HWiNFO" instead of breaking.
+- **D3D dynamic** is GPU memory the driver keeps in system RAM. If it grows while VRAM is full and bus load spikes, VRAM is spilling over PCIe and you will likely see stutter.
+- **GPU bus load** is PCIe link utilization. Sustained 80–100% under load means the GPU is waiting on data, which is common for x8 cards on older PCIe 3.0 platforms.
+- Chart order is set by `CHART_ORDER` in `static/index.html`, and new charts are one entry in the `CHARTS` array.
 
 ## API
 
@@ -151,6 +170,7 @@ But the goal is still utility first. If something looks cool but hurts readabili
 ## Current UI direction
 
 The interface currently focuses on:
+- a one-screen **live charts grid** for CPU, GPU and RAM
 - a simplified **live temperature graph**
 - cleaner GPU detail panels
 - filtered storage cards
@@ -159,7 +179,7 @@ The interface currently focuses on:
 ## Notes for future work
 
 Likely next improvements:
-- rolling history buffers with smarter graph scaling
+- longer or configurable chart history
 - better grouping of high-value GPU metrics
 - more explicit sensor selection rules in the frontend
 - optional compact and expanded dashboard modes
