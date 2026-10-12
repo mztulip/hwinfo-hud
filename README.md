@@ -40,7 +40,7 @@ hwinfo-monitor/
 - HWiNFO64 running (tested with HWiNFO64 **v8.54**)
 - HWiNFO Sensor window open
 - **Shared Memory Support** enabled in HWiNFO
-- Python 3.10+
+- Python 3.10+ (tested with Python **3.14.5**, FastAPI 0.143.0, uvicorn 0.54.0)
 
 ## Setup
 
