@@ -4,6 +4,8 @@
 
 ### Customizable chart layout
 
+- The whole page is now a board of movable, resizable blocks (summary cards, charts and all detail sections); Edit layout moved to the top bar
+- Moving shows a drop marker and moves the block on release, so blocks of different heights no longer flicker while dragging; the page scrolls when dragging near the window edge
 - Added an **Edit layout** mode for the live charts: drag to reorder, corner handle to resize (1–3 columns wide, 60–600px tall)
 - Layout is saved per browser in `localStorage`, and **Reset** restores the default
 - Cards in the same row stretch to equal height, and widths are clamped to the current column count on narrow screens

@@ -211,22 +211,31 @@
       vertical-align: -1px;
     }
 
-    /* cards flow left to right and wrap; each card's width is a fraction of the row (set from JS),
-       so a narrower card leaves room next to it instead of filling the row */
-    .chart-grid {
+    /* The whole page is one board of tiles. Tiles flow left to right and wrap; each tile's width is a
+       share of the row (set from JS), so a narrower tile leaves room next to it instead of filling the row. */
+    .board {
       display: flex;
       flex-wrap: wrap;
       align-items: stretch;
       gap: 12px;
     }
-    .chart-card {
-      padding: 10px 12px;
+    .tile {
+      position: relative;
       display: flex;
       flex-direction: column;
       flex: 0 0 auto;
       min-width: min(220px, 100%);
       max-width: 100%;
     }
+    /* content tiles: the body grows with the row, and scrolls if made shorter than its content */
+    .tile-body { flex: 1 0 auto; min-height: 0; }
+    .tile-body.sized { flex: 1 1 auto; overflow: auto; }
+    .tile-body > .section-title:first-child { margin-top: 0; }
+    .chart-card { padding: 10px 12px; }
+
+    /* inner grids adapt to the tile width instead of the window width */
+    .auto-grid-sm { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; }
+    .auto-grid-md { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
 
     /* layout editing: drag cards to reorder, corner handle to resize */
     .layout-btn {
@@ -243,14 +252,14 @@
     .layout-btn:hover { background: rgba(255,255,255,0.08); color: var(--text); }
     .layout-btn.active { color: #7DE6FF; border-color: rgba(0,217,255,0.45); background: rgba(0,217,255,0.10); }
     .layout-hint { font-size: 10px; color: #7DE6FF; letter-spacing: 0.04em; }
-    .chart-grid.editing .chart-card {
+    .board.editing .tile {
       cursor: grab;
       outline: 1px dashed rgba(0,217,255,0.45);
       outline-offset: 2px;
       user-select: none;
       touch-action: none; /* lets touch screens drag instead of scroll */
     }
-    .chart-card.dragging { opacity: 0.3; }
+    .tile.dragging { opacity: 0.3; }
     .drag-ghost {
       position: fixed;
       z-index: 100;
@@ -260,6 +269,15 @@
       box-shadow: 0 18px 48px rgba(0,0,0,0.6), 0 0 0 1px rgba(0,217,255,0.6);
     }
     body.layout-dragging, body.layout-dragging * { cursor: grabbing !important; }
+    .drop-marker {
+      position: absolute;
+      z-index: 99;
+      width: 4px;
+      border-radius: 4px;
+      background: var(--cyan);
+      box-shadow: 0 0 12px rgba(0,217,255,0.9);
+      pointer-events: none;
+    }
     .resize-handle {
       display: none;
       position: absolute;
@@ -270,7 +288,7 @@
       background: linear-gradient(135deg, transparent 50%, rgba(0,217,255,0.75) 50%);
       border-bottom-right-radius: 10px;
     }
-    .chart-grid.editing .resize-handle { display: block; }
+    .board.editing .resize-handle { display: block; }
     .size-ctrl {
       display: none;
       position: absolute;
@@ -281,7 +299,7 @@
       color: #7DE6FF;
       z-index: 5;
     }
-    .chart-grid.editing .size-ctrl { display: flex; }
+    .board.editing .size-ctrl { display: flex; }
     .size-ctrl button {
       width: 16px; height: 16px;
       line-height: 14px;
@@ -372,7 +390,7 @@
     .health-item.blue { background: rgba(0,217,255,0.06); border-color: rgba(0,217,255,0.14); color: #85E8FF; }
 
     @media (max-width: 900px) {
-      .chart-card { width: 100% !important; }
+      .tile { width: 100% !important; }
       .gpu-stat-grid { grid-template-columns: repeat(2, minmax(0,1fr)); }
       .main-grid-3, .main-grid-4, .main-grid-2 { grid-template-columns: 1fr !important; }
     }
@@ -394,86 +412,103 @@
       <div class="flex items-center gap-3">
         <input id="searchInput" class="mono text-[11px] bg-black/30 border border-white/10 rounded px-3 py-2 outline-none" style="color:var(--text); width:220px" placeholder="Search sensors" />
         <button id="refreshBtn" class="mono text-[10px] uppercase tracking-widest px-3 py-2 rounded border border-white/10 bg-white/5 hover:bg-white/10">Refresh</button>
+        <button id="layoutResetBtn" class="layout-btn mono" hidden>Reset</button>
+        <button id="layoutEditBtn" class="layout-btn mono">Edit layout</button>
         <div id="healthPill" class="pill info">Connecting...</div>
       </div>
     </header>
 
-    <section class="main-grid-3 grid grid-cols-3 gap-4 mb-4">
-      <div class="glass rounded-xl p-4">
-        <div class="bracket tl"></div><div class="bracket tr"></div>
-        <div class="eyebrow">CPU</div>
-        <div class="metric-big" id="cpuHero">Loading...</div>
-        <div class="mono text-[10px] mt-1" style="color:var(--muted)" id="cpuSub"></div>
-      </div>
-      <div class="glass rounded-xl p-4">
-        <div class="bracket tl"></div><div class="bracket tr"></div>
-        <div class="eyebrow">RAM</div>
-        <div class="metric-big" id="ramHero">Loading...</div>
-        <div class="mono text-[10px] mt-1" style="color:var(--muted)" id="ramSub"></div>
-      </div>
-      <div class="glass rounded-xl p-4">
-        <div class="bracket tl"></div><div class="bracket tr"></div><div class="bracket br"></div><div class="bracket bl"></div>
-        <div class="eyebrow">GPU</div>
-        <div class="metric-big" id="gpuHero">Loading...</div>
-        <div class="mono text-[10px] mt-1" style="color:var(--muted)" id="gpuSub"></div>
-      </div>
-    </section>
+    <div id="layoutHint" class="layout-hint mono mb-3" hidden>Drag any block to move it · drag its corner to resize · − / + jumps 1/3 · 2/3 · full · Reset restores the default layout</div>
 
-    <div class="flex items-center justify-between gap-3">
-      <div class="section-title" style="margin-top:0">Live charts — CPU / GPU</div>
-      <div class="flex items-center gap-2" style="margin-bottom:10px">
-        <span id="layoutHint" class="layout-hint mono" hidden>Drag a chart to move it · drag the corner to resize · − / + jumps 1/3 · 2/3 · full</span>
-        <button id="layoutResetBtn" class="layout-btn mono" hidden>Reset</button>
-        <button id="layoutEditBtn" class="layout-btn mono">Edit layout</button>
-      </div>
-    </div>
-    <section class="chart-grid mb-4" id="liveCharts"></section>
+    <!-- Every block below is a tile: it can be moved and resized in "Edit layout". Live chart tiles are added from JS. -->
+    <main class="board" id="board">
+      <section class="tile glass rounded-xl" data-tile="heroCpu">
+        <div class="bracket tl"></div><div class="bracket tr"></div>
+        <div class="tile-body p-4">
+          <div class="eyebrow">CPU</div>
+          <div class="metric-big" id="cpuHero">Loading...</div>
+          <div class="mono text-[10px] mt-1" style="color:var(--muted)" id="cpuSub"></div>
+        </div>
+      </section>
+      <section class="tile glass rounded-xl" data-tile="heroRam">
+        <div class="bracket tl"></div><div class="bracket tr"></div>
+        <div class="tile-body p-4">
+          <div class="eyebrow">RAM</div>
+          <div class="metric-big" id="ramHero">Loading...</div>
+          <div class="mono text-[10px] mt-1" style="color:var(--muted)" id="ramSub"></div>
+        </div>
+      </section>
+      <section class="tile glass rounded-xl" data-tile="heroGpu">
+        <div class="bracket tl"></div><div class="bracket tr"></div><div class="bracket bl"></div><div class="bracket br"></div>
+        <div class="tile-body p-4">
+          <div class="eyebrow">GPU</div>
+          <div class="metric-big" id="gpuHero">Loading...</div>
+          <div class="mono text-[10px] mt-1" style="color:var(--muted)" id="gpuSub"></div>
+        </div>
+      </section>
 
-    <div class="section-title">CPU — Temperature cores</div>
-    <section class="glass rounded-xl p-4 mb-4">
-      <div class="bracket tl"></div><div class="bracket tr"></div><div class="bracket bl"></div><div class="bracket br"></div>
-      <div>
-        <div class="flex items-center justify-between mb-2">
-          <div>
-            <div class="tiny-label">Thermal trend graph</div>
-            <div class="mono text-[11px]" style="color:var(--muted)">Only CPU temp, GPU temp, and Lenovo PCH temp.</div>
+      <section class="tile glass rounded-xl" data-tile="thermal">
+        <div class="bracket tl"></div><div class="bracket tr"></div><div class="bracket bl"></div><div class="bracket br"></div>
+        <div class="tile-body p-4">
+          <div class="section-title">CPU — Temperature cores</div>
+          <div class="flex items-center justify-between mb-2">
+            <div>
+              <div class="tiny-label">Thermal trend graph</div>
+              <div class="mono text-[11px]" style="color:var(--muted)">Only CPU temp, GPU temp, and Lenovo PCH temp.</div>
+            </div>
+          </div>
+          <div id="cpuBarsWrap" class="core-chart-wrap rounded-lg"></div>
+        </div>
+      </section>
+
+      <section class="tile glass rounded-xl" data-tile="cpuPackage">
+        <div class="bracket tl"></div><div class="bracket bl"></div>
+        <div class="tile-body p-4">
+          <div class="section-title">CPU package</div>
+          <div id="cpuPackageRows"></div>
+        </div>
+      </section>
+      <section class="tile glass rounded-xl" data-tile="cpuUtil">
+        <div class="bracket tl"></div><div class="bracket tr"></div><div class="bracket br"></div>
+        <div class="tile-body p-4">
+          <div class="section-title">CPU utilization</div>
+          <div id="cpuUtilRows"></div>
+        </div>
+      </section>
+
+      <section class="tile glass rounded-xl" data-tile="gpuHub">
+        <div class="bracket tl"></div><div class="bracket tr"></div><div class="bracket bl"></div><div class="bracket br"></div>
+        <div class="tile-body p-4">
+          <div class="section-title">GPU — Detailed hub</div>
+          <div class="auto-grid-sm mb-4" id="gpuStats"></div>
+          <div class="auto-grid-md">
+            <div class="glass rounded-lg p-4" id="gpuDetailCard"></div>
+            <div class="glass rounded-lg p-4" id="gpuMemoryCard"></div>
           </div>
         </div>
-        <div id="cpuBarsWrap" class="core-chart-wrap rounded-lg"></div>
-      </div>
-    </section>
+      </section>
 
-    <section class="main-grid-2 grid grid-cols-2 gap-4 mb-4">
-      <div class="glass rounded-xl p-4">
-        <div class="bracket tl"></div><div class="bracket bl"></div>
-        <div class="section-title" style="margin-top:0">CPU package</div>
-        <div id="cpuPackageRows"></div>
-      </div>
-      <div class="glass rounded-xl p-4">
-        <div class="bracket tl"></div><div class="bracket tr"></div><div class="bracket br"></div>
-        <div class="section-title" style="margin-top:0">CPU utilization</div>
-        <div id="cpuUtilRows"></div>
-      </div>
-    </section>
+      <section class="tile" data-tile="memory">
+        <div class="tile-body">
+          <div class="section-title">Memory</div>
+          <div class="auto-grid-sm" id="memoryStats"></div>
+        </div>
+      </section>
 
-    <div class="section-title">GPU — Detailed hub</div>
-    <section class="glass rounded-xl p-4 mb-4">
-      <div class="bracket tl"></div><div class="bracket tr"></div><div class="bracket bl"></div><div class="bracket br"></div>
-      <div class="gpu-stat-grid mb-4" id="gpuStats"></div>
-      <div class="grid grid-cols-[1.2fr_1fr] gap-4 main-grid-2">
-        <div class="glass rounded-lg p-4" id="gpuDetailCard"></div>
-        <div class="glass rounded-lg p-4" id="gpuMemoryCard"></div>
-      </div>
-    </section>
+      <section class="tile" data-tile="storage">
+        <div class="tile-body">
+          <div class="section-title">Storage</div>
+          <div class="auto-grid-md" id="storageCards"></div>
+        </div>
+      </section>
 
-    <div class="section-title">Memory</div>
-    <section class="gpu-stat-grid mb-4" id="memoryStats"></section>
-
-    <div class="section-title">Storage</div>
-    <section class="main-grid-2 grid grid-cols-2 gap-4 mb-4" id="storageCards"></section>
-
-    <div class="section-title">Health summary</div>
-    <section id="healthList"></section>
+      <section class="tile" data-tile="health">
+        <div class="tile-body">
+          <div class="section-title">Health summary</div>
+          <div id="healthList"></div>
+        </div>
+      </section>
+    </main>
   </div>
 
   <script>
@@ -776,29 +811,50 @@
       { id: 'cpuThreads', title: 'CPU usage per thread', unit: '%', decimals: 0, threads: true },
     ];
 
-    // Default layout, 3 per row: CPU / system row, GPU row, then per-thread grid (2 cells wide) + bus load.
-    // Users can rearrange and resize in "Edit layout"; their layout is kept in localStorage.
+    // Default layout: hero cards, then the live charts 3 per row (CPU / system row, GPU row, then the
+    // per-thread grid 2/3 wide + bus load), then the detail sections. Every block on the page is a tile
+    // that can be moved and resized in "Edit layout"; the layout is kept in localStorage.
     const CHART_ORDER = ['cpuTemp', 'cpuLoad', 'ramUsed', 'gpuTemp', 'gpuLoad', 'gpuVram', 'cpuThreads', 'gpuBus'];
-    // w = share of the row, where 1/3 is exactly one of three cards side by side (gaps included)
-    const DEFAULT_SIZES = { cpuThreads: { w: 2 / 3 } };
+    const TILE_ORDER = ['heroCpu', 'heroRam', 'heroGpu', ...CHART_ORDER, 'thermal', 'cpuPackage', 'cpuUtil', 'gpuHub', 'memory', 'storage', 'health'];
+    // w = share of the row, where 1/3 is exactly one of three tiles side by side (gaps included)
+    const DEFAULT_SIZES = {
+      cpuThreads: { w: 2 / 3 },
+      thermal: { w: 1 }, cpuPackage: { w: 1 / 2 }, cpuUtil: { w: 1 / 2 },
+      gpuHub: { w: 1 }, memory: { w: 1 }, storage: { w: 1 }, health: { w: 1 },
+    };
     const DEFAULT_W = 1 / 3;
     const CHART_GAP = 12;
     const MIN_CHART_W = 220;
     const SNAP_WIDTHS = [1 / 3, 1 / 2, 2 / 3, 1];
     const STEP_WIDTHS = [1 / 3, 2 / 3, 1];
     const SNAP_PX = 14;
-    const LAYOUT_KEY = 'hwinfo-hud.chart-layout.v1';
+    const LAYOUT_KEY = 'hwinfo-hud.layout.v2';
+    const OLD_LAYOUT_KEY = 'hwinfo-hud.chart-layout.v1'; // charts-only layout from before tiles
     const MIN_CHART_H = 60;
     const MAX_CHART_H = 600;
 
+    function readStored(key) {
+      try { return JSON.parse(localStorage.getItem(key)); } catch (e) { return null; }
+    }
+
     function loadLayout() {
-      let saved = null;
-      try { saved = JSON.parse(localStorage.getItem(LAYOUT_KEY)); } catch (e) { saved = null; }
-      const known = CHARTS.map(c => c.id);
+      let saved = readStored(LAYOUT_KEY);
+      if (!saved) {
+        // keep a charts-only layout from the previous version: its chart order and sizes carry over
+        const old = readStored(OLD_LAYOUT_KEY);
+        if (old) {
+          const oldCharts = (old.order || []).filter(id => CHART_ORDER.includes(id));
+          let i = 0;
+          saved = {
+            order: TILE_ORDER.map(id => CHART_ORDER.includes(id) && oldCharts[i] ? oldCharts[i++] : id),
+            sizes: old.sizes || {},
+          };
+        }
+      }
+      const known = TILE_ORDER;
       const order = Array.isArray(saved?.order) ? saved.order.filter(id => known.includes(id)) : [];
-      // charts added in a newer version land where the default order puts them
-      for (const id of CHART_ORDER) if (!order.includes(id)) order.splice(Math.min(CHART_ORDER.indexOf(id), order.length), 0, id);
-      for (const id of known) if (!order.includes(id)) order.push(id);
+      // tiles added in a newer version land where the default order puts them
+      for (const id of TILE_ORDER) if (!order.includes(id)) order.splice(Math.min(TILE_ORDER.indexOf(id), order.length), 0, id);
       const sizes = {};
       for (const id of known) {
         const size = { ...(DEFAULT_SIZES[id] || {}), ...(saved?.sizes?.[id] || {}) };
@@ -817,7 +873,6 @@
     }
 
     let layout = loadLayout();
-    CHARTS.sort((x, y) => layout.order.indexOf(x.id) - layout.order.indexOf(y.id));
 
     const layoutChrome = `<div class="size-ctrl mono">
         <button type="button" data-step="-1" title="Narrower (1/3 · 2/3 · full)">−</button>
@@ -827,10 +882,9 @@
       <div class="resize-handle" title="Drag to resize"></div>`;
 
     function buildCharts() {
-      $('liveCharts').innerHTML = CHARTS.map(c => {
+      const html = CHARTS.map(c => {
         if (c.threads) {
-          return `<div class="glass rounded-xl chart-card" data-chart="${c.id}">
-            ${layoutChrome}
+          return `<div class="glass rounded-xl chart-card tile" data-tile="${c.id}">
             <div class="bracket tl"></div><div class="bracket tr"></div><div class="bracket bl"></div><div class="bracket br"></div>
             <div class="chart-head">
               <div>
@@ -850,8 +904,7 @@
           ${i === 0 ? `<path id="${c.id}-area" fill="${s.color}" opacity="0.10" />` : ''}
           <path id="${c.id}-${s.key}" fill="none" stroke="${s.color}" stroke-width="${s.width || 2}" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke" />`
         ).join('');
-        return `<div class="glass rounded-xl chart-card" data-chart="${c.id}">
-          ${layoutChrome}
+        return `<div class="glass rounded-xl chart-card tile" data-tile="${c.id}">
           <div class="bracket tl"></div><div class="bracket tr"></div><div class="bracket bl"></div><div class="bracket br"></div>
           <div class="chart-head">
             <div>
@@ -871,6 +924,18 @@
           <div class="trace-legend" id="${c.id}-legend"></div>
         </div>`;
       }).join('');
+      const board = $('board');
+      board.querySelectorAll(':scope > .chart-card').forEach(el => el.remove());
+      board.insertAdjacentHTML('beforeend', html);
+      applyOrder();
+    }
+
+    // put tiles in the saved order and give every tile its edit controls
+    function applyOrder() {
+      const board = $('board');
+      const tiles = new Map([...board.querySelectorAll(':scope > .tile')].map(t => [t.dataset.tile, t]));
+      for (const id of layout.order) if (tiles.has(id)) board.appendChild(tiles.get(id));
+      tiles.forEach(t => { if (!t.querySelector(':scope > .size-ctrl')) t.insertAdjacentHTML('afterbegin', layoutChrome); });
     }
 
     function pushHistory(key, value) {
@@ -908,23 +973,27 @@
     const widthPx = (w, rowW) => w * (rowW + CHART_GAP) - CHART_GAP;
     const widthShare = (px, rowW) => (px + CHART_GAP) / (rowW + CHART_GAP);
 
+    // the part of a tile whose height is resized: the plot area for charts, the content for other tiles
+    const tileBody = (tile) => tile.querySelector(':scope > .chart-body') || tile.querySelector(':scope > .tile-body');
+
     function applyLayout() {
-      document.querySelectorAll('#liveCharts .chart-card').forEach(card => {
-        const size = layout.sizes[card.dataset.chart] || {};
+      document.querySelectorAll('#board > .tile').forEach(tile => {
+        const size = layout.sizes[tile.dataset.tile] || {};
         const w = size.w ?? DEFAULT_W;
         // calc keeps it proportional on any screen; the extra 0.5px stops rounding from wrapping a full row
-        card.style.width = `calc((100% + ${CHART_GAP}px) * ${w.toFixed(4)} - ${CHART_GAP + 0.5}px)`;
-        const body = card.querySelector('.chart-body');
+        tile.style.width = `calc((100% + ${CHART_GAP}px) * ${w.toFixed(4)} - ${CHART_GAP + 0.5}px)`;
+        const body = tileBody(tile);
         body.style.height = size.h ? `${size.h}px` : '';
-        card.querySelector('.size-badge').textContent = `${Math.round(w * 100)}% · ${Math.round(body.getBoundingClientRect().height)}px`;
-        card.querySelector('[data-step="-1"]').disabled = w <= STEP_WIDTHS[0] + 0.005;
-        card.querySelector('[data-step="1"]').disabled = w >= 0.995;
+        body.classList.toggle('sized', !!size.h);
+        tile.querySelector('.size-badge').textContent = `${Math.round(w * 100)}% · ${Math.round(body.getBoundingClientRect().height)}px`;
+        tile.querySelector('[data-step="-1"]').disabled = w <= STEP_WIDTHS[0] + 0.005;
+        tile.querySelector('[data-step="1"]').disabled = w >= 0.995;
       });
     }
 
     function setLayoutEditing(on) {
       layoutEditing = on;
-      $('liveCharts').classList.toggle('editing', on);
+      $('board').classList.toggle('editing', on);
       $('layoutEditBtn').classList.toggle('active', on);
       $('layoutEditBtn').textContent = on ? 'Done' : 'Edit layout';
       $('layoutResetBtn').hidden = !on;
@@ -933,85 +1002,137 @@
     }
 
     function initLayoutEditing() {
-      const grid = $('liveCharts');
+      const board = $('board');
       let dragging = null;
       let resizing = null;
 
-      // Moving uses plain pointer events (not HTML5 drag & drop, which behaves differently in Firefox):
-      // the card stays in the grid as a faded placeholder, a ghost copy follows the pointer,
-      // and the placeholder is moved before/after whichever card the pointer is over.
-      grid.addEventListener('pointerdown', (e) => {
+      // Moving uses plain pointer events (not HTML5 drag & drop, which behaves differently in Firefox).
+      // Nothing reflows while dragging: tiles have different heights, so moving the tile live would shift
+      // the layout under the pointer and make it flicker between spots. Instead the tile positions are
+      // snapshotted when the drag starts, a glowing marker shows where the tile will land, a ghost copy
+      // follows the pointer, and the tile is moved once on release. Near the top/bottom edge the page scrolls.
+      const EDGE_SCROLL_PX = 70;
+      const EDGE_SCROLL_SPEED = 18;
+
+      board.addEventListener('pointerdown', (e) => {
         if (!layoutEditing || e.button !== 0 || e.target.closest?.('.resize-handle, .size-ctrl')) return;
-        const card = e.target.closest?.('.chart-card');
+        const card = e.target.closest?.('#board > .tile');
         if (!card) return;
         e.preventDefault();
         const r = card.getBoundingClientRect();
-        dragging = { card, startX: e.clientX, startY: e.clientY, offX: e.clientX - r.left, offY: e.clientY - r.top, ghost: null };
+        dragging = { card, startX: e.clientX, startY: e.clientY, x: e.clientX, y: e.clientY, offX: e.clientX - r.left, offY: e.clientY - r.top, ghost: null };
       });
+
+      function startDragVisuals(d) {
+        const r = d.card.getBoundingClientRect();
+        d.ghost = d.card.cloneNode(true);
+        d.ghost.querySelectorAll('[id]').forEach(el => el.removeAttribute('id'));
+        d.ghost.classList.add('drag-ghost');
+        d.ghost.style.width = `${r.width}px`;
+        d.ghost.style.height = `${r.height}px`;
+        document.body.appendChild(d.ghost);
+        d.marker = document.createElement('div');
+        d.marker.className = 'drop-marker';
+        d.marker.hidden = true;
+        document.body.appendChild(d.marker);
+        // page coordinates, so the snapshot stays valid while the page scrolls
+        d.slots = [...board.querySelectorAll(':scope > .tile')].filter(t => t !== d.card).map(t => {
+          const b = t.getBoundingClientRect();
+          return { tile: t, left: b.left + scrollX, right: b.right + scrollX, top: b.top + scrollY, bottom: b.bottom + scrollY };
+        });
+        d.card.classList.add('dragging');
+        document.body.classList.add('layout-dragging');
+        d.scrollTimer = setInterval(() => edgeScroll(d), 16);
+      }
+
+      // the tile under the pointer, or the nearest one when the pointer is in a gap
+      function dropSlot(d) {
+        const px = d.x + scrollX, py = d.y + scrollY;
+        let best = null, bestDist = Infinity;
+        for (const s of d.slots) {
+          const dx = px < s.left ? s.left - px : px > s.right ? px - s.right : 0;
+          const dy = py < s.top ? s.top - py : py > s.bottom ? py - s.bottom : 0;
+          const dist = Math.hypot(dx, dy);
+          if (dist < bestDist) { bestDist = dist; best = s; }
+        }
+        if (!best) return null;
+        // before/after by the pointer's horizontal half, like reading order
+        return { slot: best, after: px > best.left + (best.right - best.left) / 2 };
+      }
+
+      function updateDrag(d) {
+        d.ghost.style.left = `${d.x - d.offX}px`;
+        d.ghost.style.top = `${d.y - d.offY}px`;
+        d.drop = dropSlot(d);
+        if (!d.drop) { d.marker.hidden = true; return; }
+        const { slot, after } = d.drop;
+        d.marker.hidden = false;
+        d.marker.style.left = `${(after ? slot.right + CHART_GAP / 2 : slot.left - CHART_GAP / 2) - 2}px`;
+        d.marker.style.top = `${slot.top}px`;
+        d.marker.style.height = `${slot.bottom - slot.top}px`;
+      }
+
+      function edgeScroll(d) {
+        const dir = d.y < EDGE_SCROLL_PX ? -1 : d.y > innerHeight - EDGE_SCROLL_PX ? 1 : 0;
+        if (!dir) return;
+        const before = scrollY;
+        scrollBy(0, dir * EDGE_SCROLL_SPEED);
+        if (scrollY !== before) updateDrag(d);
+      }
 
       window.addEventListener('pointermove', (e) => {
         if (!dragging) return;
         const d = dragging;
+        d.x = e.clientX;
+        d.y = e.clientY;
         if (!d.ghost) {
           // small dead zone so a plain click doesn't start a drag
-          if (Math.hypot(e.clientX - d.startX, e.clientY - d.startY) < 6) return;
-          const r = d.card.getBoundingClientRect();
-          d.ghost = d.card.cloneNode(true);
-          d.ghost.querySelectorAll('[id]').forEach(el => el.removeAttribute('id'));
-          d.ghost.classList.add('drag-ghost');
-          d.ghost.style.width = `${r.width}px`;
-          d.ghost.style.height = `${r.height}px`;
-          document.body.appendChild(d.ghost);
-          d.card.classList.add('dragging');
-          document.body.classList.add('layout-dragging');
+          if (Math.hypot(d.x - d.startX, d.y - d.startY) < 6) return;
+          startDragVisuals(d);
         }
-        d.ghost.style.left = `${e.clientX - d.offX}px`;
-        d.ghost.style.top = `${e.clientY - d.offY}px`;
-
-        const target = document.elementFromPoint(e.clientX, e.clientY)?.closest?.('#liveCharts .chart-card');
-        if (!target || target === d.card) return;
-        const r = target.getBoundingClientRect();
-        // before/after by the pointer's horizontal half, like reading order
-        const after = e.clientX > r.left + r.width / 2;
-        const ref = after ? target.nextSibling : target;
-        if (ref !== d.card && ref !== d.card.nextSibling) grid.insertBefore(d.card, ref);
+        updateDrag(d);
       });
 
-      const endDrag = () => {
+      const endDrag = (e) => {
         if (!dragging) return;
         const d = dragging;
         dragging = null;
         if (!d.ghost) return;
+        clearInterval(d.scrollTimer);
         d.ghost.remove();
+        d.marker.remove();
         d.card.classList.remove('dragging');
         document.body.classList.remove('layout-dragging');
-        layout.order = [...grid.querySelectorAll('.chart-card')].map(c => c.dataset.chart);
-        CHARTS.sort((x, y) => layout.order.indexOf(x.id) - layout.order.indexOf(y.id));
-        saveLayout();
+        if (e.type === 'pointerup' && d.drop) {
+          const { slot, after } = d.drop;
+          board.insertBefore(d.card, after ? slot.tile.nextSibling : slot.tile);
+          layout.order = [...board.querySelectorAll(':scope > .tile')].map(t => t.dataset.tile);
+          saveLayout();
+        }
         applyLayout();
       };
       window.addEventListener('pointerup', endDrag);
       window.addEventListener('pointercancel', endDrag);
 
-      grid.addEventListener('pointerdown', (e) => {
+      board.addEventListener('pointerdown', (e) => {
         const handle = e.target.closest?.('.resize-handle');
         if (!layoutEditing || !handle) return;
         e.preventDefault();
         e.stopPropagation();
-        const card = handle.closest('.chart-card');
-        const body = card.querySelector('.chart-body');
+        const card = handle.closest('.tile');
+        const body = tileBody(card);
         resizing = {
-          id: card.dataset.chart,
+          id: card.dataset.tile,
           startX: e.clientX,
           startY: e.clientY,
           startH: body.getBoundingClientRect().height,
           startW: card.getBoundingClientRect().width,
-          rowW: grid.clientWidth,
+          rowW: board.clientWidth,
         };
         handle.setPointerCapture(e.pointerId);
       });
 
-      grid.addEventListener('pointermove', (e) => {
+      board.addEventListener('pointermove', (e) => {
         if (!resizing) return;
         const { id, startX, startY, startH, startW, rowW } = resizing;
         // free width, measured from where the drag started (so it keeps working if the card wraps),
@@ -1034,10 +1155,10 @@
       };
 
       // -/+ jump between 1/3, 2/3 and full width (handy for cards at the right edge)
-      grid.addEventListener('click', (e) => {
+      board.addEventListener('click', (e) => {
         const btn = e.target.closest?.('.size-ctrl button');
         if (!layoutEditing || !btn) return;
-        const id = btn.closest('.chart-card').dataset.chart;
+        const id = btn.closest('.tile').dataset.tile;
         const w = layout.sizes[id]?.w ?? DEFAULT_W;
         const next = Number(btn.dataset.step) > 0
           ? (STEP_WIDTHS.find(f => f > w + 0.005) ?? 1)
@@ -1046,19 +1167,17 @@
         saveLayout();
         applyLayout();
       });
-      grid.addEventListener('pointerup', endResize);
-      grid.addEventListener('pointercancel', endResize);
+      board.addEventListener('pointerup', endResize);
+      board.addEventListener('pointercancel', endResize);
 
       $('layoutEditBtn').addEventListener('click', () => setLayoutEditing(!layoutEditing));
       $('layoutResetBtn').addEventListener('click', () => {
         try { localStorage.removeItem(LAYOUT_KEY); } catch (e) { /* storage unavailable */ }
+        try { localStorage.removeItem(OLD_LAYOUT_KEY); } catch (e) { /* storage unavailable */ }
         layout = loadLayout();
-        CHARTS.sort((x, y) => layout.order.indexOf(x.id) - layout.order.indexOf(y.id));
-        buildCharts();
-        threadLayoutSig = '';
+        applyOrder();
         applyLayout();
         setLayoutEditing(true);
-        if (lastFullReadings.length) renderCharts(lastFullReadings);
       });
       // widths are proportional, only the size badge needs refreshing on window resize
       window.addEventListener('resize', applyLayout);
@@ -1319,7 +1438,7 @@
 
       $('gpuDetailCard').innerHTML = `
         <div class="section-title" style="margin-top:0">Power, clocks, limits</div>
-        <div class="grid grid-cols-2 gap-4 main-grid-2">
+        <div class="auto-grid-md">
           <div>
             ${kvRow('GPU clock', `<span class="tiny-value mono">${fmt(gpuClock?.value,0)} MHz current</span>`, pill('core', 'info'))}
             ${effectiveClock ? kvRow('Effective clock', `<span class="tiny-value mono">avg ${fmt(effectiveClock.avg,0)} MHz · now ${fmt(effectiveClock.value,0)} MHz</span>`, pill('effective', 'info')) : ''}
@@ -1508,7 +1627,7 @@
       render(filtered, latestMeta);
     });
 
-    buildCharts();
+    buildCharts(); // also puts every tile in the saved order
     applyLayout();
     initLayoutEditing();
     connect();

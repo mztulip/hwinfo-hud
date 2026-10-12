@@ -93,14 +93,16 @@ Notes:
 
 ### Customizing the layout
 
-Click **Edit layout** next to the "Live charts" heading:
+Every block on the page can be moved and resized: the CPU / RAM / GPU summary cards, each live chart, the thermal trend graph, CPU package, CPU utilization, the GPU hub, Memory, Storage and Health summary.
 
-- **Move**: drag a chart and drop it where you want it. The other charts reflow live.
-- **Resize**: drag the corner handle at the bottom right. Width is free, from about 220px up to the full row, and it briefly snaps to 1/3, 1/2, 2/3 and full width so charts line up easily. Height is free too (60–600px). A narrower chart leaves room next to it instead of filling the row, and charts in the same row stretch to the same height.
-- **Width buttons**: **−** / **+** next to the size label jump between 1/3, 2/3 and full width. This also works for charts at the right edge, where there is no room to drag.
+Click **Edit layout** in the top bar:
+
+- **Move**: drag any block. A glowing marker shows where it will land, and the block moves when you release. Hold it near the top or bottom edge of the window to scroll the page.
+- **Resize**: drag the corner handle at the bottom right. Width is free, from about 220px up to the full row, and it briefly snaps to 1/3, 1/2, 2/3 and full width so blocks line up easily. Height is free too (60–600px). A block made shorter than its content gets a scrollbar. A narrower block leaves room next to it instead of filling the row, and blocks in the same row stretch to the same height.
+- **Width buttons**: **−** / **+** next to the size label jump between 1/3, 2/3 and full width. This also works for blocks at the right edge, where there is no room to drag.
 - **Done** leaves edit mode, and **Reset** restores the default layout.
 
-The layout is saved in the browser's `localStorage`, so each browser or device keeps its own arrangement. Widths are stored as a share of the row, so a layout looks the same on another resolution. Below 900px every chart takes the full width.
+The layout is saved in the browser's `localStorage`, so each browser or device keeps its own arrangement. Widths are stored as a share of the row, so a layout looks the same on another resolution. Below 900px every block takes the full width. A charts-only layout saved by an earlier version is carried over automatically.
 
 ## API
 
