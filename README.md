@@ -2,6 +2,8 @@
 
 A live hardware dashboard built on top of **HWiNFO64 shared memory**, a **Python reader**, a **FastAPI + WebSocket server**, and a browser UI tuned for readable real-time telemetry.
 
+![HWiNFO HUD live charts on a 1080p screen](docs/screenshot.png)
+
 ## What this repo is
 
 This project reads sensor data from HWiNFO64 and streams it into a custom dashboard.
@@ -26,6 +28,8 @@ hwinfo-monitor/
 ├── reader.py
 ├── requirements.txt
 ├── server.py
+├── docs/
+│   └── screenshot.png
 └── static/
     └── index.html
 ```
