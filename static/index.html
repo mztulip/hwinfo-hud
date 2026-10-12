@@ -913,14 +913,14 @@
       const gpu = pick(readings, ['gpu [#0]']) || pick(readings, ['gpu']);
       const memAvail = pick(readings, ['physical memory available']);
       const memUsed = pick(readings, ['physical memory used']);
-      const memTotal = memAvail && memUsed ? memAvail.value + memUsed.value : null;
+      const memTotal = memAvail && memUsed ? toGB(memAvail) + toGB(memUsed) : null;
       const gpuTemp = pick(readings, ['gpu temperature']);
 
       $('cpuHero').textContent = cpu ? cpu.sensor.replace(/^CPU \[#0\]:\s*/, '') : 'CPU not found';
       $('cpuSub').textContent = 'Live HWiNFO telemetry';
 
-      $('ramHero').innerHTML = memTotal ? `${fmt(memTotal, 0)} <span>GB total</span>` : 'RAM not found';
-      $('ramSub').textContent = memUsed ? `${fmt(memUsed.value, 1)}GB used` : 'System memory';
+      $('ramHero').innerHTML = memTotal ? `${fmt(memTotal, 1)} <span>GB total</span>` : 'RAM not found';
+      $('ramSub').textContent = memUsed ? `${fmt(toGB(memUsed), 1)} GB used` : 'System memory';
 
       $('gpuHero').textContent = gpu ? gpu.sensor.replace(/^d?GPU \[#\d+\]:\s*/i, '') : 'GPU not found';
       $('gpuSub').textContent = gpuTemp ? `${fmt(gpuTemp.value, 1)}°C current` : 'Live telemetry';
@@ -1046,7 +1046,7 @@
           </div>
         </div>`;
 
-      const totalVRam = memoryAvailable && memoryAllocated ? memoryAvailable.value + memoryAllocated.value : null;
+      const totalVRam = memoryAvailable && memoryAllocated ? toGB(memoryAvailable) + toGB(memoryAllocated) : null;
       const usageWidth = Math.min(100, Math.max(0, memoryUsagePct?.value || 0));
       $('gpuMemoryCard').innerHTML = `
         <div class="section-title" style="margin-top:0">VRAM + thermal detail</div>
@@ -1055,15 +1055,15 @@
             <div class="flex items-center justify-between mb-2">
               <div>
                 <div class="eyebrow">Memory usage</div>
-                <div class="metric-big">${fmt(memoryAllocated?.value)}<span> GB allocated</span></div>
+                <div class="metric-big">${fmt(toGB(memoryAllocated), 2)}<span> GB allocated</span></div>
               </div>
               ${pill(memoryUsagePct?.value >= 85 ? 'high' : memoryUsagePct?.value >= 60 ? 'active' : 'light', memoryUsagePct?.value >= 85 ? 'bad' : memoryUsagePct?.value >= 60 ? 'warm' : 'ok')}
             </div>
             <div class="mini-progress"><span style="width:${usageWidth}%; background: linear-gradient(90deg, #00D9FF, #00FF88)"></span></div>
-            <div class="mono text-[10px] mt-2" style="color:var(--muted)">${fmt(memoryUsagePct?.value)}% usage · ${totalVRam ? fmt(totalVRam,0) : '--'} GB total · ${fmt(memoryAvailable?.value)} GB free</div>
+            <div class="mono text-[10px] mt-2" style="color:var(--muted)">${fmt(memoryUsagePct?.value)}% usage · ${totalVRam ? fmt(totalVRam,1) : '--'} GB total · ${fmt(toGB(memoryAvailable), 2)} GB free</div>
           </div>
-          ${kvRow('Dedicated D3D', `<span class="tiny-value mono">${fmt(memDedicated?.value)} GB</span>`, pill('resident', 'info'))}
-          ${memDynamic && isMeaningfulNumber(memDynamic.value) ? kvRow('Dynamic D3D', `<span class="tiny-value mono">${fmt(memDynamic.value)} GB</span>`, pill('dynamic', 'info')) : ''}
+          ${kvRow('Dedicated D3D', `<span class="tiny-value mono">${fmt(toGB(memDedicated), 2)} GB</span>`, pill('resident', 'info'))}
+          ${memDynamic && isMeaningfulNumber(memDynamic.value) ? kvRow('Dynamic D3D', `<span class="tiny-value mono">${fmt(toGB(memDynamic), 2)} GB</span>`, pill('dynamic', 'info')) : ''}
           ${memoryJunction ? kvRow('Memory junction / hotspot', `<span class="tiny-value mono">${fmt(memoryJunction.value)}°C current · peak ${fmt(memoryJunction.max)}°C</span>`, pill(memoryJunction.value >= 85 ? 'hot' : memoryJunction.value >= 75 ? 'warm' : 'ok', memoryJunction.value >= 85 ? 'bad' : memoryJunction.value >= 75 ? 'warm' : 'ok')) : ''}
           ${thermalLimit ? kvRow('Thermal limit', `<span class="tiny-value mono">${fmt(thermalLimit.value,0)}°C</span>`, pill('ceiling', 'info')) : ''}
           ${memCtrl ? kvRow('Memory controller', `<span class="tiny-value mono">avg ${fmt(memCtrl.avg)}% · now ${fmt(memCtrl.value)}%</span>`, pill('activity', memCtrl.value >= 80 ? 'warm' : 'info')) : ''}
@@ -1074,12 +1074,12 @@
       const used = pick(readings, ['physical memory used']);
       const avail = pick(readings, ['physical memory available']);
       const load = pick(readings, ['physical memory load']);
-      const total = used && avail ? used.value + avail.value : null;
+      const total = used && avail ? toGB(used) + toGB(avail) : null;
       const dimmTemps = readings.filter(r => lower(r.sensor).includes('ddr5 dimm') && lower(r.label).includes('temperature'));
       const hottestDimm = dimmTemps.length ? [...dimmTemps].sort((a, b) => b.value - a.value)[0] : null;
 
       $('memoryStats').innerHTML = [
-        statCard('Total RAM', `${fmt(total,0)}<span> GB</span>`, used ? `${fmt(used.value,1)} GB used · ${fmt(avail.value,1)} GB free` : ''),
+        statCard('Total RAM', `${fmt(total,1)}<span> GB</span>`, used ? `${fmt(toGB(used),1)} GB used · ${fmt(toGB(avail),1)} GB free` : ''),
         statCard('Memory load', `${fmt(load?.value ?? load?.avg)}<span>%</span>`, load ? `avg ${fmt(load.avg)}%` : ''),
         statCard('DIMM thermal', hottestDimm ? `${fmt(hottestDimm.value)}<span>°C</span>` : '--', hottestDimm ? hottestDimm.sensor.replace(/^DDR5 DIMM \[#\d+\]:\s*/, '') : 'No DIMM temp'),
         statCard('Status', `${(load?.value || load?.avg || 0) > 80 ? 'Pressured' : 'Healthy'}<span></span>`, (load?.value || load?.avg || 0) > 80 ? 'High RAM pressure detected' : 'Headroom looks fine')
