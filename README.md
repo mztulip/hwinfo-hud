@@ -96,11 +96,11 @@ Notes:
 Click **Edit layout** next to the "Live charts" heading:
 
 - **Move**: drag a chart and drop it where you want it. The other charts reflow live.
-- **Resize**: drag the corner handle at the bottom right. Width snaps to 1–3 columns (a quarter of a column is enough to step, and a dashed outline previews the width), and height is free (60–600px). Other charts in the same row stretch to match.
-- **Width buttons**: **−** / **+** next to the size label change the width by one column. This also works for charts in the rightmost column, where there is no room to drag.
+- **Resize**: drag the corner handle at the bottom right. Width is free, from about 220px up to the full row, and it briefly snaps to 1/3, 1/2, 2/3 and full width so charts line up easily. Height is free too (60–600px). A narrower chart leaves room next to it instead of filling the row, and charts in the same row stretch to the same height.
+- **Width buttons**: **−** / **+** next to the size label jump between 1/3, 2/3 and full width. This also works for charts at the right edge, where there is no room to drag.
 - **Done** leaves edit mode, and **Reset** restores the default layout.
 
-The layout is saved in the browser's `localStorage`, so each browser or device keeps its own arrangement. On narrower screens a chart's width is capped to the available columns.
+The layout is saved in the browser's `localStorage`, so each browser or device keeps its own arrangement. Widths are stored as a share of the row, so a layout looks the same on another resolution. Below 900px every chart takes the full width.
 
 ## API
 
