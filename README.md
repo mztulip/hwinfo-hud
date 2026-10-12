@@ -89,7 +89,17 @@ Notes:
 - Charts with a missing sensor show "Sensor not found in HWiNFO" instead of breaking.
 - **D3D dynamic** is GPU memory the driver keeps in system RAM. If it grows while VRAM is full and bus load spikes, VRAM is spilling over PCIe and you will likely see stutter.
 - **GPU bus load** is PCIe link utilization. Sustained 80–100% under load means the GPU is waiting on data, which is common for x8 cards on older PCIe 3.0 platforms.
-- Chart order is set by `CHART_ORDER` in `static/index.html`, and new charts are one entry in the `CHARTS` array.
+- The default order is set by `CHART_ORDER` in `static/index.html`, and new charts are one entry in the `CHARTS` array.
+
+### Customizing the layout
+
+Click **Edit layout** next to the "Live charts" heading:
+
+- **Move**: drag a chart and drop it where you want it. The other charts reflow live.
+- **Resize**: drag the corner handle at the bottom right. Width snaps to 1–3 columns and height is free (60–600px). Other charts in the same row stretch to match.
+- **Done** leaves edit mode, and **Reset** restores the default layout.
+
+The layout is saved in the browser's `localStorage`, so each browser or device keeps its own arrangement. On narrower screens a chart's width is capped to the available columns.
 
 ## API
 

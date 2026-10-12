@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-10-12 (later)
+
+### Customizable chart layout
+
+- Added an **Edit layout** mode for the live charts: drag to reorder, corner handle to resize (1–3 columns wide, 60–600px tall)
+- Layout is saved per browser in `localStorage`, and **Reset** restores the default
+- Cards in the same row stretch to equal height, and widths are clamped to the current column count on narrow screens
+
 ## 2026-10-12
 
 ### Live charts
